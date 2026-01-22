@@ -11,6 +11,7 @@ use snowflake;
 use crate::AppState;
 use crate::Clients;
 use crate::UserConnection;
+use crate::controllers::message_controller;
 
 pub async fn ws_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -60,23 +61,46 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
     });
     //there is sender and receiver for each user
     let clients_r=clients.clone();
+    //use dashmap
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             // println!("received: {:?}", msg);
             match msg{
                 Message::Text(text)=>{
                     println!("got text, {:?}",text);
-                    let mut a:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();
-                    // println!("{}",a["auth_token"]);
-                    // println!("{}",a["action"]);
-                    // println!("{}",a["payload"]);
-                    // let c=a["payload"].as_str().unwrap().as_bytes().to_vec();
-                    let b=a["id"].as_u64().unwrap_or(0);
-                    println!("send to:, {:?}",b);
-                    // let shared_msg = Arc::new(msg);//check the size first if string is small its better to send direclty
-                    if let Some(uc)=clients_r.read().await.get(&b){
-                        uc.tx.send(text);
+                    if let Ok(mut ws_msg) = serde_json::from_str::<serde_json::Value>(&text) {
+                        
+                        let token = ws_msg["token"]["accesstoken"].as_str();
+                        let action = ws_msg["action"].as_str();
+                        let receiver_id = ws_msg["id"].as_u64();
+                        //we check all , lock frees then move , and unnecss things are left behind to die
+                        if let (Some(t), Some(act), Some(rid)) = (token, action, receiver_id) {
+                            
+                            let action_owned = act.to_string(); 
+                            
+                            let payload = ws_msg["payload"].take();//take is copy of original pointer
+                            // let b=["id"].as_u64().unwrap_or(0);
+                            println!("send to:, {:?}",rid);
+                            // let shared_msg = Arc::new(msg);//check the size first if string is small its better to send direclty
+                            if let Some(uc)=clients_r.read().await.get(&rid){
+                                uc.tx.send(text);
+                            }//put this in ws controllers 
+                            message_controller::ws_router::decide(&action_owned, payload);
+                            drop(ws_msg); 
+                            // drop(text);
+                        }
                     }
+                        // println!("{}",a);//check this if invalid disconnect
+                        // println!("{}",a["auth_token"]);//check this if invalid disconnect
+                        // println!("token{}",access_token);//verify accesstoken
+
+                                // println!("enterned in action");
+                                
+                                // let c=ws_msg["payload"];
+                               
+                            // let c=a["payload"].as_str().unwrap().as_bytes().to_vec();
+                            // let shared_msg = Arc::new(msg);
+                            //check the size first if string is small its better to send direclty
                 },
                 Message::Ping(ping)=>{
                     println!("got ping, {:?}",ping);
