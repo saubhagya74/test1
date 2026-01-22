@@ -1,14 +1,17 @@
 
-use std::{ collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{ collections::HashMap, f32::consts::E, net::SocketAddr, sync::Arc};
 
 use axum::{self, Json, Router, extract::{ConnectInfo, State, WebSocketUpgrade, ws::{Message, Utf8Bytes, WebSocket}}, http::StatusCode, response::IntoResponse, routing::get};
-use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt, lock::Mutex};
 use serde::de::Error;
 use serde_json::{Value, json};
 use tokio::{self, sync::{RwLock, mpsc}};
-use sqlx;
+use sqlx::{self, Pool, Postgres};
+use argon2;
+use snowflake::{self, SnowflakeIdBucket};
 use controllers::user_controller;
 mod controllers;
+mod dbb;
 mod wss;
 pub struct UserConnection{
     socket_addr: std::net::SocketAddr,
@@ -20,6 +23,8 @@ pub type Clients=Arc<RwLock<HashMap<u64,UserConnection>>>;
 #[derive(Clone)]
 pub struct AppState{
     clients: Clients,
+    bucket_id: Arc<Mutex<SnowflakeIdBucket>>,
+    db_pool: Pool<Postgres>
 }
 
 #[tokio::main]
@@ -28,38 +33,39 @@ async fn main(){
     
     let my_addr="0.0.0.0:6745";
     let my_listener=tokio::net::TcpListener::bind(my_addr).await.unwrap();
+    // let mut bucketid=snowflake::SnowflakeIdBucket::new(1,1);
+    // let ide=bucketid.get_id()
+    let db_pool = match dbb::pgcon().await {
+        Ok(pool) => {
+            println!("successfully connected to database");
+            Some(pool)
+        }
+        Err(e) => {
+            println!("error connecting to db: {:?}", e);
+            None
+        }
+    };
+    let mut bucket_id=Arc::new(Mutex::new(
+        snowflake::SnowflakeIdBucket::new(1, 1)));
 
     let state= AppState{
         clients:clients.clone(),
+        bucket_id: bucket_id.clone(),
+        db_pool: db_pool.unwrap()
     };
-    
     let myrouter=Router::new()
     .route("/hello", get(||async{"hello".to_string()}))
-    .route("/ws", get(wss::ws_handler))
-    .with_state(state);
+    .route("/ws", get(wss::ws_handler));
     
     let router=Router::new()
     .merge(myrouter)
-    .merge(user_controller::routerfile::give_router());
+    .merge(user_controller::routerfile::give_router())
+    .with_state(state);
     
-
-    pgcon().await;
 
     println!("Server Started"); 
     axum::serve(my_listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
     
 }
 
-async fn pgcon(){
 
-    let db_url = "postgresql://devuser:mypassword@192.168.1.97:5432/channelapi";
-    
-    let conn_pool =sqlx::postgres::PgPoolOptions::new()
-        .max_connections(5)
-        .connect(db_url)
-        .await;
-    match conn_pool{
-            Ok(value)=>{println!("connected to database")},
-            Err(e)=>{ println!("error connecting database {:?}",e)}
-    }
-}

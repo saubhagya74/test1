@@ -7,7 +7,7 @@ use serde::de::Error;
 use serde_json::{Value, json};
 use tokio::{self, sync::{RwLock,mpsc}};
 use sqlx;
-
+use snowflake;
 use crate::AppState;
 use crate::Clients;
 use crate::UserConnection;
@@ -34,6 +34,8 @@ pub async fn ws_handler(
 }
 pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,id:u64) {
 
+    println!("Client Connected: {:?} with id {}",addr,id);
+
     let (mut sender, mut receiver) = socket.split();
 
     let (tx, mut rx) = mpsc::unbounded_channel::<Utf8Bytes>();
@@ -48,6 +50,7 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
         lock_client.insert(id, conn);
     }
     let clients_s=clients.clone();
+    
     let mut send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
             if sender.send(Message::Text(msg)).await.is_err() {
@@ -57,7 +60,6 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
     });
     //there is sender and receiver for each user
     let clients_r=clients.clone();
-
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             // println!("received: {:?}", msg);
@@ -65,11 +67,14 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
                 Message::Text(text)=>{
                     println!("got text, {:?}",text);
                     let mut a:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();
-                    println!("{}",a["auth_token"]);
-                    println!("{}",a["action"]);
-                    println!("{}",a["payload"]);
+                    // println!("{}",a["auth_token"]);
+                    // println!("{}",a["action"]);
+                    // println!("{}",a["payload"]);
+                    // let c=a["payload"].as_str().unwrap().as_bytes().to_vec();
+                    let b=a["id"].as_u64().unwrap_or(0);
+                    println!("send to:, {:?}",b);
                     // let shared_msg = Arc::new(msg);//check the size first if string is small its better to send direclty
-                    if let Some(uc)=clients_r.read().await.get(&id){
+                    if let Some(uc)=clients_r.read().await.get(&b){
                         uc.tx.send(text);
                     }
                 },
