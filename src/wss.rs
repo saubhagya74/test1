@@ -11,7 +11,7 @@ use snowflake;
 use crate::AppState;
 use crate::Clients;
 use crate::UserConnection;
-use crate::controllers::message_controller;
+use crate::controllers::message_controller_ws;
 
 pub async fn ws_handler(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -72,22 +72,19 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
                         
                         let token = ws_msg["token"]["accesstoken"].as_str();
                         let action = ws_msg["action"].as_str();
-                        let receiver_id = ws_msg["id"].as_u64();
+                        // let receiver_id = ws_msg["id"].as_u64();//come form payload
                         //we check all , lock frees then move , and unnecss things are left behind to die
-                        if let (Some(t), Some(act), Some(rid)) = (token, action, receiver_id) {
+                        if let (Some(t), Some(act)) = (token, action) {
                             
                             let action_owned = act.to_string(); 
                             
                             let payload = ws_msg["payload"].take();//take is copy of original pointer
-                            // let b=["id"].as_u64().unwrap_or(0);
-                            println!("send to:, {:?}",rid);
+                            
                             // let shared_msg = Arc::new(msg);//check the size first if string is small its better to send direclty
-                            if let Some(uc)=clients_r.read().await.get(&rid){
-                                uc.tx.send(text);
-                            }//put this in ws controllers 
-                            message_controller::ws_router::decide(&action_owned, payload);
+                            
+                            message_controller_ws::ws_router::decide(&action_owned, payload,clients_r.clone());
                             drop(ws_msg); 
-                            // drop(text);
+                            drop(text);
                         }
                     }
                         // println!("{}",a);//check this if invalid disconnect

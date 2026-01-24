@@ -6,13 +6,17 @@ use futures_util::{SinkExt, StreamExt, lock::Mutex};
 use serde::de::Error;
 use serde_json::{Value, json};
 use tokio::{self, sync::{RwLock, mpsc}};
+use chrono;
+use argon2; 
 use sqlx::{self, Pool, Postgres};
-use argon2;
 use snowflake::{self, SnowflakeIdBucket};
-use controllers::user_controller;
+use controllers::{message_controller, user_controller};
+use tower_http;
+use tower_http::cors::CorsLayer;
 mod controllers;
 mod dbb;
 mod wss;
+
 pub struct UserConnection{
     socket_addr: std::net::SocketAddr,
     tx: tokio::sync::mpsc::UnboundedSender<Utf8Bytes>
@@ -30,7 +34,10 @@ pub struct AppState{
 #[tokio::main]
 async fn main(){
     let clients:Clients= Arc::new(RwLock::new(HashMap::new()));
-    
+    let cors = CorsLayer::new()
+    .allow_origin(tower_http::cors::Any)
+    .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS]) // Add OPTIONS here
+    .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::HeaderName::from_static("id")]); // Add "id" explicitly
     let my_addr="0.0.0.0:6745";
     let my_listener=tokio::net::TcpListener::bind(my_addr).await.unwrap();
     // let mut bucketid=snowflake::SnowflakeIdBucket::new(1,1);
@@ -54,13 +61,14 @@ async fn main(){
         db_pool: db_pool.unwrap()
     };
     let myrouter=Router::new()
-    .route("/hello", get(||async{"hello".to_string()}))
     .route("/ws", get(wss::ws_handler));
     
     let router=Router::new()
     .merge(myrouter)
-    .merge(user_controller::routerfile::give_router())
-    .with_state(state);
+    .merge(user_controller::routerfile::get_router())
+    .merge(message_controller::routerfile::get_router().await)
+    .with_state(state)
+    .layer(cors);//fror dev purpose onlyt
     
 
     println!("Server Started"); 

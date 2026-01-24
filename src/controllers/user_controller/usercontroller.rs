@@ -18,6 +18,12 @@ pub async fn return_user()-> Json<Value>{
         }
     ))
 }
+#[derive(Deserialize)] 
+pub struct CreateUserPayload {
+    pub username: String,
+    pub email: String,
+    pub password: String
+}
 pub async fn create_user(
     State(state): State<AppState>, 
     Json(payload): Json<CreateUserPayload> // Extracted from the POST body
@@ -89,12 +95,6 @@ pub async fn login_user(
     ).into_response(),
         Err(_) => (StatusCode::UNAUTHORIZED, "invalid email or password").into_response(),
     }
-}
-#[derive(Deserialize)]
-pub struct CreateUserPayload {
-    pub username: String,
-    pub email: String,
-    pub password: String
 }
 #[derive(serde::Deserialize)]
 pub struct LoginPayload {
