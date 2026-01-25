@@ -1,7 +1,7 @@
 
 use std::{ collections::HashMap, f32::consts::E, net::SocketAddr, sync::Arc};
 
-use axum::{self, Json, Router, extract::{ConnectInfo, State, WebSocketUpgrade, ws::{Message, Utf8Bytes, WebSocket}}, http::StatusCode, response::IntoResponse, routing::get};
+use axum::{self, Json, Router, body::Bytes, extract::{ConnectInfo, State, WebSocketUpgrade, ws::{Message, Utf8Bytes, WebSocket}}, http::StatusCode, response::IntoResponse, routing::get};
 use futures_util::{SinkExt, StreamExt, lock::Mutex};
 use serde::de::Error;
 use serde_json::{Value, json};
@@ -10,16 +10,17 @@ use chrono;
 use argon2; 
 use sqlx::{self, Pool, Postgres};
 use snowflake::{self, SnowflakeIdBucket};
-use controllers::{message_controller, user_controller};
+use controllers::{message_controller, message_controller_ws::messagecontroller::MessagePrivateDB, user_controller};
 use tower_http;
 use tower_http::cors::CorsLayer;
 mod controllers;
+mod db_workers;
 mod dbb;
 mod wss;
 
 pub struct UserConnection{
     socket_addr: std::net::SocketAddr,
-    tx: tokio::sync::mpsc::UnboundedSender<Utf8Bytes>
+    tx: tokio::sync::mpsc::UnboundedSender<Bytes>
 }
 
 pub type Clients=Arc<RwLock<HashMap<u64,UserConnection>>>;
@@ -28,16 +29,19 @@ pub type Clients=Arc<RwLock<HashMap<u64,UserConnection>>>;
 pub struct AppState{
     clients: Clients,
     bucket_id: Arc<Mutex<SnowflakeIdBucket>>,
-    db_pool: Pool<Postgres>
-}
+    db_pool: Pool<Postgres>,
+    tx_db_batch: Arc<tokio::sync::mpsc::UnboundedSender<MessagePrivateDB>>
+}//ai says no need arc cuz unbounder sender is already as cheap to clone
 
 #[tokio::main]
 async fn main(){
     let clients:Clients= Arc::new(RwLock::new(HashMap::new()));
+
     let cors = CorsLayer::new()
     .allow_origin(tower_http::cors::Any)
     .allow_methods([axum::http::Method::POST, axum::http::Method::OPTIONS]) // Add OPTIONS here
     .allow_headers([axum::http::header::CONTENT_TYPE, axum::http::header::HeaderName::from_static("id")]); // Add "id" explicitly
+    
     let my_addr="0.0.0.0:6745";
     let my_listener=tokio::net::TcpListener::bind(my_addr).await.unwrap();
     // let mut bucketid=snowflake::SnowflakeIdBucket::new(1,1);
@@ -54,12 +58,21 @@ async fn main(){
     };
     let mut bucket_id=Arc::new(Mutex::new(
         snowflake::SnowflakeIdBucket::new(1, 1)));
-
+        
+    let (db_tx,db_rx)=tokio::sync::mpsc
+    ::unbounded_channel::<MessagePrivateDB>();
+    
     let state= AppState{
         clients:clients.clone(),
         bucket_id: bucket_id.clone(),
-        db_pool: db_pool.unwrap()
+        db_pool: db_pool.unwrap(),
+        tx_db_batch: Arc::new(db_tx)
     };
+
+    let state_for_db=state.clone();
+    tokio::spawn(async move{
+        db_workers::db_batcher(state_for_db, db_rx).await;
+    });
     let myrouter=Router::new()
     .route("/ws", get(wss::ws_handler));
     
@@ -69,6 +82,7 @@ async fn main(){
     .merge(message_controller::routerfile::get_router().await)
     .with_state(state)
     .layer(cors);//fror dev purpose onlyt
+    
     
 
     println!("Server Started"); 

@@ -1,14 +1,14 @@
 
 use std::{ any::type_name_of_val, collections::HashMap, net::SocketAddr, sync::Arc};
 
-use axum::{self, Json, Router, extract::{ConnectInfo, State, WebSocketUpgrade, ws::{Message, Utf8Bytes, WebSocket}}, http::{HeaderMap, StatusCode}, response::IntoResponse, routing::get};
+use axum::{self, Json, Router, body::Bytes, extract::{ConnectInfo, State, WebSocketUpgrade, ws::{Message, Utf8Bytes, WebSocket}}, http::{HeaderMap, StatusCode}, response::IntoResponse, routing::get};
 use futures_util::{SinkExt, StreamExt};
-use serde::de::Error;
-use serde_json::{Value, json};
-use tokio::{self, sync::{RwLock,mpsc}};
+use serde::{Deserialize, de::Error};
+use serde_json::{Value, json, value};
+use tokio::{self, runtime::Id, sync::{RwLock,mpsc}};
 use sqlx;
 use snowflake;
-use crate::AppState;
+use crate::{AppState, controllers::message_controller_ws::ws_router::decide};
 use crate::Clients;
 use crate::UserConnection;
 use crate::controllers::message_controller_ws;
@@ -30,16 +30,17 @@ pub async fn ws_handler(
     if id==0 {return StatusCode::BAD_REQUEST.into_response();}
 
     return ws.on_upgrade(move |socket|{
-        handle_socket(socket,state.clients,addr,id)
+        handle_socket(socket,state,addr,id)
     });
 }
-pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,id:u64) {
+pub async fn handle_socket(socket: WebSocket,state:AppState, addr: SocketAddr,id:u64) {
 
     println!("Client Connected: {:?} with id {}",addr,id);
 
     let (mut sender, mut receiver) = socket.split();
 
-    let (tx, mut rx) = mpsc::unbounded_channel::<Utf8Bytes>();
+    let (tx, mut rx) = mpsc
+    ::unbounded_channel::<Bytes>();
     
     let conn=UserConnection{
         socket_addr: addr,
@@ -47,57 +48,40 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
     };
 
     {
-        let mut lock_client=clients.write().await;
+        let mut lock_client=state.clients.write().await;
         lock_client.insert(id, conn);
     }
-    let clients_s=clients.clone();
+    // let s_state=state.clients.clone();
     
     let mut send_task = tokio::spawn(async move {
         while let Some(msg) = rx.recv().await {
-            if sender.send(Message::Text(msg)).await.is_err() {
+            if sender.send(Message::Binary(msg)).await.is_err(){
                 break;
             }
         }
     });
     //there is sender and receiver for each user
-    let clients_r=clients.clone();
+    let r_state=state.clone();
     //use dashmap
     let mut recv_task = tokio::spawn(async move {
         while let Some(Ok(msg)) = receiver.next().await {
             // println!("received: {:?}", msg);
             match msg{
+                Message::Binary(bin_data)=>{
+                    println!("{:?}",bin_data);
+                    if let Ok(ws_msg)=serde_json::from_slice::<WsEnvelope>(&bin_data){
+                        // let atoken=ws_msg.token.accesstoken;
+                        // let action=ws_msg.action;
+                        // println!("{:?}",ws_msg);
+                        // println!("{:?}",ws_msg.action);
+                        // println!("{:?}",ws_msg.token);
+                        // println!("{:?}",atoken);
+                        message_controller_ws::ws_router
+                        ::decide(ws_msg.action, ws_msg.payload, r_state.clone(), id).await;
+                    }
+                },
                 Message::Text(text)=>{
                     println!("got text, {:?}",text);
-                    if let Ok(mut ws_msg) = serde_json::from_str::<serde_json::Value>(&text) {
-                        
-                        let token = ws_msg["token"]["accesstoken"].as_str();
-                        let action = ws_msg["action"].as_str();
-                        // let receiver_id = ws_msg["id"].as_u64();//come form payload
-                        //we check all , lock frees then move , and unnecss things are left behind to die
-                        if let (Some(t), Some(act)) = (token, action) {
-                            
-                            let action_owned = act.to_string(); 
-                            
-                            let payload = ws_msg["payload"].take();//take is copy of original pointer
-                            
-                            // let shared_msg = Arc::new(msg);//check the size first if string is small its better to send direclty
-                            
-                            message_controller_ws::ws_router::decide(&action_owned, payload,clients_r.clone());
-                            drop(ws_msg); 
-                            drop(text);
-                        }
-                    }
-                        // println!("{}",a);//check this if invalid disconnect
-                        // println!("{}",a["auth_token"]);//check this if invalid disconnect
-                        // println!("token{}",access_token);//verify accesstoken
-
-                                // println!("enterned in action");
-                                
-                                // let c=ws_msg["payload"];
-                               
-                            // let c=a["payload"].as_str().unwrap().as_bytes().to_vec();
-                            // let shared_msg = Arc::new(msg);
-                            //check the size first if string is small its better to send direclty
                 },
                 Message::Ping(ping)=>{
                     println!("got ping, {:?}",ping);
@@ -105,15 +89,11 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
                 Message::Pong(text)=>{
                     println!("got pong, {:?}",text);
                 },
-                Message::Binary(text)=>{
-                    println!("got binary, {:?}",text);
-                },
                 Message::Close(close)=>{
                     println!("got closed, {:?}",Some(close));//some wtf??unwrap
                 },
                 _ => {}
             }
-            
         }
     });
 
@@ -122,3 +102,16 @@ pub async fn handle_socket(socket: WebSocket,clients: Clients, addr: SocketAddr,
         _ = (&mut recv_task) => send_task.abort(),
     };
 }
+#[derive(Deserialize,Debug)]
+struct WsEnvelope<'a> {
+    #[serde(borrow)]
+    token: TokenData<'a>,
+    action: &'a str,
+    #[serde(borrow)]
+    payload: &'a value::RawValue,
+}
+
+#[derive(Deserialize,Debug)]
+struct TokenData<'a> {
+    accesstoken: &'a str,
+}//payload lai ni same estai garne

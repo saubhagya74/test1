@@ -94,7 +94,7 @@ pub async fn get_recent_messages(
     .fetch_all(&state.db_pool)
     .await
     .map_err(|e| {
-        println!("SQLX ERROR: {:?}", e);
+        println!("sqlx: {:?}", e);
         StatusCode::INTERNAL_SERVER_ERROR})?;
 
     Ok(Json(messages))
