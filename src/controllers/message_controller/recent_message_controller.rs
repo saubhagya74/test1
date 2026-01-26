@@ -51,7 +51,8 @@ pub async fn get_recent_messages(
     headers: HeaderMap,
     Json(payload): Json<Value>
 ) -> Result<impl IntoResponse, StatusCode> {
-    
+    //do by receiver id and sender id, cuz whatever we  do we check by 
+    // sernderidand receiver id in redis and in postgres
     let user_id = headers.get("id")
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.parse::<i64>().ok())
@@ -64,6 +65,7 @@ pub async fn get_recent_messages(
     
     let timestamp_str = payload["timestamp"].as_str()
         .ok_or(StatusCode::BAD_REQUEST)?;
+        
     let timestamp = chrono::DateTime::parse_from_rfc3339(timestamp_str)
         .map_err(|_| StatusCode::BAD_REQUEST)?
         .with_timezone(&chrono::Utc);
@@ -86,10 +88,10 @@ pub async fn get_recent_messages(
           and (c.user_a_id_ = $2 OR c.user_b_id_ = $2)
           and m.messaged_at_ < $3
           and m.is_deleted_ = false
-        order by m.messaged_at_ DESC
+        order by m.messaged_at_ desc
         limit $4
     "#,
-        chat_id, user_id, timestamp, 10i64
+        chat_id as i64, user_id as i64, timestamp, 10i64
     )
     .fetch_all(&state.db_pool)
     .await

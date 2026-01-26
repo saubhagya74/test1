@@ -1,0 +1,78 @@
+done conversation
+create table conversation_(
+    conversation_id_ bigint primary key,
+    chat_name_ varchar(30),
+    last_message_ varchar(15),
+    last_time_ timestamptz default CURRENT_TIMESTAMP,
+    user_a_id_ bigint not null,
+    user_b_id_ bigint not null,
+    settings_ jsonb default '{
+    "is_pinned_":"false",
+    "notification_level_":"all",
+    "theme_":"default",
+    "direction_": [0,0]
+    }'::jsonb
+);
+done content type enum
+////////////
+use sqlx::Row; // Needed for .get()
+
+let rows = sqlx::query("SELECT conversation_id_, last_message_ FROM conversations_ WHERE user_a_id_ = $1")
+    .bind(id3)
+    .fetch_all(&state.db_pool)
+    .await
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+let json_list: Vec<serde_json::Value> = rows.iter().map(|row| {
+    serde_json::json!({
+        "id": row.get::<i64, _>("conversation_id_"),
+        "msg": row.get::<Option<String>, _>("last_message_")
+    })
+}).collect();
+let conversation_rows = sqlx::query!(
+    "SELECT conversation_id_, chat_name_, last_message_, last_time_ 
+     FROM conversations_ 
+     WHERE user_a_id_ = $1 OR user_b_id_ = $1 
+     ORDER BY last_time_ DESC 
+     LIMIT $2",
+    id3, 
+    10i64
+)
+.fetch_all(&state.db_pool)
+.await
+.map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+// Here, conversation_rows is a Vec of an anonymous internal struct.
+// You can turn it into JSON directly:
+let response_data = serde_json::to_value(conversation_rows)
+    .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?; alwasy use query! or as
+
+    {"action":"sendMessagePrivate","token":{"accesstoken":"thisisatoken"},"payload":{ "sender_id": 7420747096048934897, "receiver_id": 7420747096048934907 ,"content_type": "text", "description":"verylongstring"}}
+    
+    curl -i  -X POST http://localhost:6745/getRecentMessages   -H "Content-Type: application/json"   -H "id:7420747096048934897" -d '{ "chatid":1001, "timestamp": "2026-02-25T21:30:00Z"}'
+    
+    {"action":"sendMessagePrivate","token":{"accesstoken":"thisisatoken"},"payload":{ "sender_id": 7420747096048934897, "receiver_id": 7420747096048934907 ,"chat_id":1001,"content_type": "text", "description":"hello bro how y doing??"}}   
+    
+    -- Note: Always store the smaller ID in user_a to make matching easier
+    
+    CREATE OR REPLACE FUNCTION insert_private_message(
+    p_sender BIGINT, p_receiver BIGINT, p_msg TEXT, ...
+) RETURNS VOID AS $$
+DECLARE
+    v_chat_id BIGINT;
+BEGIN
+    -- Logic: Find or Create conversation
+    INSERT INTO conversation_ (...) VALUES (...)
+    ON CONFLICT (...) DO UPDATE ...
+    RETURNING chat_id_ INTO v_chat_id;
+
+    -- Logic: Insert Message
+    INSERT INTO message_ (chat_id_, ...) VALUES (v_chat_id, ...);
+END;
+$$ LANGUAGE plpgsql;
+ALTER TABLE conversation_ ADD CONSTRAINT unique_user_pair UNIQUE (user_a_id_, user_b_id_);
+ALTER TABLE conversation_
+ADD CONSTRAINT check_user_order CHECK (user_a_id_ < user_b_id_);
+ curl -i -X POST http://localhost:6745/getRecentMessages   -H "Content-Type: application/json"   -H "id:7420747096048934897" -d '{ "chatid": 1001, "timestamp": "2026-01-26T23:59:59Z" }'
+
+

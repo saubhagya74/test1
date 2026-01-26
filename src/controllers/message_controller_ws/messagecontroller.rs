@@ -41,7 +41,9 @@ pub async fn send_message_private<'a>(
         description: des.clone(),
         created_at: chrono::Utc::now().timestamp()
     } ;
-    let _ = state.tx_db_batch.send(db_rec);
+    
+    let _ = state.tx_db_batch_private.send(db_rec);
+
 }
 
 pub struct MessagePrivateDB{

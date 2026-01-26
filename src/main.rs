@@ -5,7 +5,7 @@ use axum::{self, Json, Router, body::Bytes, extract::{ConnectInfo, State, WebSoc
 use futures_util::{SinkExt, StreamExt, lock::Mutex};
 use serde::de::Error;
 use serde_json::{Value, json};
-use tokio::{self, sync::{RwLock, mpsc}};
+use tokio::{self, sync::{RwLock, mpsc::{self, UnboundedReceiver}}};
 use chrono;
 use argon2; 
 use sqlx::{self, Pool, Postgres};
@@ -30,7 +30,7 @@ pub struct AppState{
     clients: Clients,
     bucket_id: Arc<Mutex<SnowflakeIdBucket>>,
     db_pool: Pool<Postgres>,
-    tx_db_batch: Arc<tokio::sync::mpsc::UnboundedSender<MessagePrivateDB>>
+    tx_db_batch_private: Arc<tokio::sync::mpsc::UnboundedSender<MessagePrivateDB>>
 }//ai says no need arc cuz unbounder sender is already as cheap to clone
 
 #[tokio::main]
@@ -58,7 +58,7 @@ async fn main(){
     };
     let mut bucket_id=Arc::new(Mutex::new(
         snowflake::SnowflakeIdBucket::new(1, 1)));
-        
+    // let mut rx_hashmap: HashMap<String,UnboundedReceiver<Mess>>
     let (db_tx,db_rx)=tokio::sync::mpsc
     ::unbounded_channel::<MessagePrivateDB>();
     
@@ -66,13 +66,17 @@ async fn main(){
         clients:clients.clone(),
         bucket_id: bucket_id.clone(),
         db_pool: db_pool.unwrap(),
-        tx_db_batch: Arc::new(db_tx)
+        tx_db_batch_private: Arc::new(db_tx)
     };
 
-    let state_for_db=state.clone();
+    // db_batcher_spawner(state.clone());
+    let s1=state.clone();
     tokio::spawn(async move{
-        db_workers::db_batcher(state_for_db, db_rx).await;
+        db_workers::db_batcher_private(s1, db_rx).await;
     });
+
+    // tokio::spawn
+    
     let myrouter=Router::new()
     .route("/ws", get(wss::ws_handler));
     
@@ -89,5 +93,8 @@ async fn main(){
     axum::serve(my_listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap();
     
 }
+// fn db_batcher_spawner(state: AppState){
 
+    
 
+// }

@@ -30,6 +30,7 @@ pub async fn get_recent_talk(
         "select chat_id_, chat_name_, last_message_, last_time_, user_a_id_, user_b_id_ 
         from conversation_ 
         where user_a_id_ = $1 OR user_b_id_ = $1 
+        order by last_time_ desc
         limit $2",
         user_id as i64,
         10i64
