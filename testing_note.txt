@@ -76,3 +76,50 @@ ADD CONSTRAINT check_user_order CHECK (user_a_id_ < user_b_id_);
  curl -i -X POST http://localhost:6745/getRecentMessages   -H "Content-Type: application/json"   -H "id:7420747096048934897" -d '{ "chatid": 1001, "timestamp": "2026-01-26T23:59:59Z" }'
 
 
+
+begin transaction
+make the table1 in memory using those vecs 
+make another memtable2 where descroption is trimmed(dont use LEFT it breaks fastness of primary key)
+make another memtable3 for updating in conversation( user_a_id , user_b_id_,last_message,last_time)
+make another memtable4 for fresh insert in conversation (full convo schema)
+take user_a_id_ and user_b_id_ from table2 and check exixtence
+on true insert that row into memtable3 for updating
+on false insert that row into memtable4 for fresh insert
+
+now bulk unnest UPDATE
+         unnest fresh insert
+         unnest insert into message_
+
+// Use the "Mega-Query" logic within sqlx
+let result = sqlx::query!(
+    r#"
+    WITH raw_data AS (
+        SELECT * FROM UNNEST(
+            $1::int8[], $2::int8[], $3::int8[], $4::int8[], 
+            $5::text[], $6::text[], $7::timestamptz[], $8::int8[], $9::int8[]
+        ) AS t(msg_id, s_id, r_id, new_c_id, content, tri_desc, m_at, u_a, u_b)
+    ),
+    -- Handle conversations: Insert if missing, Update if exists
+    upsert_convo AS (
+        INSERT INTO conversation_ (chat_id_, user_a_id_, user_b_id_, last_message_, last_time_)
+        SELECT DISTINCT ON (u_a, u_b) 
+            new_c_id, u_a, u_b, tri_desc, m_at 
+        FROM raw_data
+        ON CONFLICT (user_a_id_, user_b_id_) 
+        DO UPDATE SET 
+            last_message_ = EXCLUDED.last_message_,
+            last_time_ = EXCLUDED.last_time_
+        RETURNING chat_id_, user_a_id_, user_b_id_
+    )
+    -- Insert all messages linking to the chat_id from the upsert step
+    INSERT INTO message_ (message_id_, chat_id_, sender_id_, receiver_id_, description_, messaged_at_)
+    SELECT 
+        r.msg_id, u.chat_id_, r.s_id, r.r_id, r.content, r.m_at
+    FROM raw_data r
+    JOIN upsert_convo u ON r.u_a = u.user_a_id_ AND r.u_b = u.user_b_id_;
+    "#,
+    &message_ids, &sender_ids, &receiver_ids, &new_chat_ids,
+    &descriptions, &trimmed_descriptions, &messaged_ats,
+    &user_a_ids, &user_b_ids
+).execute(&state.db_pool).await;
+Deduplication: In a 500ms window, Alice might send 5 messages to Bob. Your user_a_ids vector will have that pair 5 times. If you don't use DISTINCT ON (u_a, u_b) in your SQL, you will try to insert/update the conversation 5 times for the same pair.
