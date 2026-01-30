@@ -9,7 +9,7 @@ use chrono;
 use argon2; 
 use sqlx::{self, Pool, Postgres};
 use snowflake::{self, SnowflakeIdBucket};
-use controllers::{message_controller, message_controller_ws::messagecontroller::MessagePrivateDB, user_controller};
+use controllers::{message_controller, message_controller_ws::{messagecontroller::MessagePrivateDB, send_request_controller::{WSRequestDB, WSRequestPayload}}, user_controller};
 use tower_http;
 use tower_http::cors::CorsLayer;
 mod controllers;
@@ -29,7 +29,8 @@ pub struct AppState{
     clients: Clients,
     bucket_id: Arc<Mutex<SnowflakeIdBucket>>,
     db_pool: Pool<Postgres>,
-    tx_db_batch_private: Arc<tokio::sync::mpsc::UnboundedSender<MessagePrivateDB>>
+    tx_db_batch_private: Arc<tokio::sync::mpsc::UnboundedSender<MessagePrivateDB>>,
+    tx_db_wsrequest: Arc<tokio::sync::mpsc::UnboundedSender<WSRequestDB>>
 }//ai says no need arc cuz unbounder sender is already as cheap to clone
 
 #[tokio::main]
@@ -58,20 +59,26 @@ async fn main(){
     let mut bucket_id=Arc::new(Mutex::new(
         snowflake::SnowflakeIdBucket::new(1, 1)));
     // let mut rx_hashmap: HashMap<String,UnboundedReceiver<Mess>>
-    let (db_tx,db_rx)=tokio::sync::mpsc
+    let (db_tx_p,db_rx_p)=tokio::sync::mpsc
     ::unbounded_channel::<MessagePrivateDB>();
-    
+    let (tx_db_wr,rx_db_wr)=tokio::sync::mpsc
+    ::unbounded_channel::<WSRequestDB>();
     let state= AppState{
         clients:clients.clone(),
         bucket_id: bucket_id.clone(),
         db_pool: db_pool.unwrap(),
-        tx_db_batch_private: Arc::new(db_tx)
+        tx_db_batch_private: Arc::new(db_tx_p),
+        tx_db_wsrequest: Arc::new(tx_db_wr)
     };
 
     // db_batcher_spawner(state.clone());
     let s1=state.clone();
     tokio::spawn(async move{
-        db_workers::db_batcher_private(s1, db_rx).await;
+        db_workers::db_batcher_private(s1, db_rx_p).await;
+    });
+    let s2=state.clone();
+    tokio::spawn(async move{
+        db_workers::ws_request_batcher(s2,rx_db_wr).await;
     });
 
     // tokio::spawn

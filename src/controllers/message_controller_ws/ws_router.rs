@@ -28,7 +28,7 @@ pub async fn decide(
         "sendRequest" => {
             match serde_json::from_str::<WSRequestPayload>(raw_payload.get()){
                 Ok(payload)=>{
-                    send_request_controller::send_request(payload,state.clone(),user_id);
+                    send_request_controller::send_request(payload,state.clone(),user_id).await;
                 },
                 Err(e)=>{
                     println!("wsrouter;sendRequest;parsing failed {:?}",e)

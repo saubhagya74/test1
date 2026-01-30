@@ -41,6 +41,14 @@ let conversation_rows = sqlx::query!(
 .fetch_all(&state.db_pool)
 .await
 .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+channelapi=> ALTER TABLE request_ 
+ALTER COLUMN request_status_ TYPE smallint 
+USING CASE 
+    WHEN request_status_ = TRUE THEN 1 
+    ELSE 0 
+END;
+ALTER TABLE
+
 
 // Here, conversation_rows is a Vec of an anonymous internal struct.
 // You can turn it into JSON directly:
@@ -125,3 +133,37 @@ let result = sqlx::query!(
     &user_a_ids, &user_b_ids
 ).execute(&state.db_pool).await;
 Deduplication: In a 500ms window, Alice might send 5 messages to Bob. Your user_a_ids vector will have that pair 5 times. If you don't use DISTINCT ON (u_a, u_b) in your SQL, you will try to insert/update the conversation 5 times for the same pair.
+
+    WITH inserted_requests AS (
+                INSERT INTO request_ (request_id_, sender_id_, receiver_id_, request_status_, requested_at_)
+                SELECT * FROM UNNEST(
+                    $1::int8[], -- request_ids
+                    $2::int8[], -- sender_ids
+                    $3::int8[], -- receiver_ids
+                    $4::int2[], -- statuses
+                    $5::timestamptz[] -- timestamps
+                ) AS t(r_id, s_id, rec_id, stat, req_at)
+                RETURNING request_id_, sender_id_, receiver_id_, request_status_, requested_at_
+            )
+            INSERT INTO home_ (
+                notification_id_, 
+                user_id_, 
+                notification_object_, 
+                created_at_
+            )
+            SELECT 
+                -- Assuming you generate notification IDs in Rust and pass them as $6
+                n_id, 
+                r.receiver_id_, 
+                to_jsonb(r), -- This "automagically" converts the row into a JSON object
+                r.requested_at_
+            FROM (
+                -- This zips the inserted rows with your pre-generated notification IDs
+                SELECT r.*, n_id 
+                FROM inserted_requests r
+                JOIN UNNEST($6::int8[]) WITH ORDINALITY AS n(n_id, ord) 
+                ON r.request_id_ = (SELECT request_id_ FROM inserted_requests LIMIT 1 OFFSET n.ord-1)
+            ) r;
+
+  {"action":"sendRequest","token":{"accesstoken":"thisisatoken"},"payload":{ "sender_id": 7420747096048934897, "receiver_id": 7420747096048934907}}   
+{"action":"sendRequest","token":{"accesstoken":"thisisatoken"},"payload":{ "sender_id": 7420747096048934897,"receiver_id": 7420747096048934907, "status":0}}   
