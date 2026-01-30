@@ -52,7 +52,9 @@ let response_data = serde_json::to_value(conversation_rows)
     curl -i  -X POST http://localhost:6745/getRecentMessages   -H "Content-Type: application/json"   -H "id:7420747096048934897" -d '{ "chatid":1001, "timestamp": "2026-02-25T21:30:00Z"}'
     
     {"action":"sendMessagePrivate","token":{"accesstoken":"thisisatoken"},"payload":{ "sender_id": 7420747096048934897, "receiver_id": 7420747096048934907 ,"chat_id":1001,"content_type": "text", "description":"hello bro how y doing??"}}   
-    
+    {"action":"sendRequest","token":{"accesstoken":"thisisatoken"},"payload":{ "sender_id": 7420747096048934897, "receiver_id": 7420747096048934907}}   
+
+
     -- Note: Always store the smaller ID in user_a to make matching easier
     
     CREATE OR REPLACE FUNCTION insert_private_message(

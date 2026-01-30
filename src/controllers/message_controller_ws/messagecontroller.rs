@@ -6,7 +6,7 @@ use crate::{AppState, Clients, controllers::message_controller::recent_message_c
 
 
 #[derive(Deserialize,Debug)]
-pub struct WSMessagePrivate<'a>{
+pub struct WSMessagePrivatePayload<'a>{
     pub sender_id : u64,
     pub receiver_id : u64,
     pub chat_id : Option<u64>,
@@ -17,7 +17,7 @@ pub struct WSMessagePrivate<'a>{
 // #[derive(Deserialize,Debug)]
 
 pub async fn send_message_private<'a>(
-    payload :WSMessagePrivate<'a>,
+    payload :WSMessagePrivatePayload<'a>,
     state:AppState,
     user_id:u64
 ){
@@ -31,10 +31,9 @@ pub async fn send_message_private<'a>(
         //ithink we need to creat time right here
         uc.tx.send(des.clone());
     }
-    //conversation table update garna lai ni new channel 
     let db_rec=MessagePrivateDB
     {
-        sender_id: payload.sender_id,
+        sender_id: user_id,
         receiver_id: payload.receiver_id,
         chat_id: payload.chat_id,
         content_type: payload.content_type,
