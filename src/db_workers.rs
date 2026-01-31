@@ -229,7 +229,7 @@ pub async fn ws_request_batcher(
                 ),
                 insert_to_requests as (
                     insert into request_ (request_id_, sender_id_, receiver_id_,
-                     request_status_, requested_at_)
+                     request_status_, timestamp_)
                     select r_id, se_id, re_id, st_id, tim_id FROM raw_data
                 ),
                 insert_to_home_sender AS (

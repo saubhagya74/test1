@@ -2,7 +2,7 @@ use serde_json::{Value, value};
 
 use crate::{AppState, Clients, controllers::message_controller_ws::messagecontroller::WSMessagePrivatePayload};
 
-use super::{messagecontroller, send_request_controller::{ self, WSRequestPayload}};
+use super::{group_creation_controller::{self, WSCreateGroupPayload}, messagecontroller, send_request_controller::{ self, WSAcceptRequest, WSRequestPayload}};
 
 // println!("indecidefunc {}",payload);
 pub async fn decide(
@@ -36,11 +36,28 @@ pub async fn decide(
             }
         },
         "acceptRequest" => {
-            println!("logic here..");
+            match serde_json::from_str::<WSAcceptRequest>(raw_payload.get()){
+                Ok(payload)=>{
+                    send_request_controller::accept_request(payload, state.clone(), user_id).await;
+                },
+                Err(e)=>{
+                    println!("wsacceptreqtparsingerror{:?}",e);
+                }
+            }
         },
         "declineRequest" => {
             println!("logic here..");
         }, 
+        "createGroup" => {
+            match serde_json::from_str::<WSCreateGroupPayload>(raw_payload.get()){
+                Ok(payload)=>{
+                    group_creation_controller::create_group(payload, state.clone(), user_id).await;
+                },
+                Err(e)=>{
+                    println!("groupCreatePayloadParsing:{e}");
+                }
+            }
+        },
         "like" => {
             println!("logic here..");
         },

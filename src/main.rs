@@ -9,11 +9,13 @@ use chrono;
 use argon2; 
 use sqlx::{self, Pool, Postgres};
 use snowflake::{self, SnowflakeIdBucket};
-use controllers::{message_controller, message_controller_ws::{messagecontroller::MessagePrivateDB, send_request_controller::{WSRequestDB, WSRequestPayload}}, user_controller};
+use controllers::{message_controller, message_controller_ws::{group_creation_controller::{WSCreateGroupDB, WSInitialMemberDB}, messagecontroller::MessagePrivateDB, send_request_controller::{WSAcceptRequest, WSAcceptRequestDB, WSRequestDB, WSRequestPayload}}, user_controller};
 use tower_http;
 use tower_http::cors::CorsLayer;
 mod controllers;
 mod db_workers;
+mod db_worker2;
+mod db_group_worker;
 mod dbb;
 mod wss;
 
@@ -30,8 +32,13 @@ pub struct AppState{
     bucket_id: Arc<Mutex<SnowflakeIdBucket>>,
     db_pool: Pool<Postgres>,
     tx_db_batch_private: Arc<tokio::sync::mpsc::UnboundedSender<MessagePrivateDB>>,
-    tx_db_wsrequest: Arc<tokio::sync::mpsc::UnboundedSender<WSRequestDB>>
-}//ai says no need arc cuz unbounder sender is already as cheap to clone
+    tx_db_ws_request: Arc<tokio::sync::mpsc::UnboundedSender<WSRequestDB>>,
+    tx_db_ws_accept_req: Arc<tokio::sync::mpsc::UnboundedSender<WSAcceptRequestDB>>,
+    tx_db_ws_create_group: Arc<tokio::sync::mpsc::UnboundedSender<WSCreateGroupDB>>,
+    tx_db_ws_initial_member: Arc<tokio::sync::mpsc::UnboundedSender<WSInitialMemberDB>>,
+}
+
+//ai says no need arc cuz unbounder sender is already as cheap to clone
 
 #[tokio::main]
 async fn main(){
@@ -63,12 +70,22 @@ async fn main(){
     ::unbounded_channel::<MessagePrivateDB>();
     let (tx_db_wr,rx_db_wr)=tokio::sync::mpsc
     ::unbounded_channel::<WSRequestDB>();
+    let (tx_db_war,rx_db_war)=tokio::sync::mpsc
+    ::unbounded_channel::<WSAcceptRequestDB>();
+    let (tx_db_wcg,rx_db_wcg)=tokio::sync::mpsc
+    ::unbounded_channel::<WSCreateGroupDB>();
+        let (tx_db_wim,rx_db_wim)=tokio::sync::mpsc
+    ::unbounded_channel::<WSInitialMemberDB>();
+
     let state= AppState{
         clients:clients.clone(),
         bucket_id: bucket_id.clone(),
         db_pool: db_pool.unwrap(),
         tx_db_batch_private: Arc::new(db_tx_p),
-        tx_db_wsrequest: Arc::new(tx_db_wr)
+        tx_db_ws_request: Arc::new(tx_db_wr),
+        tx_db_ws_accept_req: Arc::new(tx_db_war),
+        tx_db_ws_create_group: Arc::new(tx_db_wcg),
+        tx_db_ws_initial_member: Arc::new(tx_db_wim)
     };
 
     // db_batcher_spawner(state.clone());
@@ -80,8 +97,18 @@ async fn main(){
     tokio::spawn(async move{
         db_workers::ws_request_batcher(s2,rx_db_wr).await;
     });
-
-    // tokio::spawn
+    let s3=state.clone();
+    tokio::spawn(async move{
+        db_worker2::ws_accept_decline_request(s3,rx_db_war).await;
+    });
+    let s4=state.clone();
+    tokio::spawn(async move{
+        db_group_worker::create_group(s4,rx_db_wcg).await;
+    });
+    let s5=state.clone();
+    tokio::spawn(async move{
+        db_group_worker::insert_initial_member(s5,rx_db_wim).await;
+    });
     
     let myrouter=Router::new()
     .route("/ws", get(wss::ws_handler));

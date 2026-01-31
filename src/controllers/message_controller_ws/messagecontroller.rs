@@ -5,22 +5,13 @@ use serde_json::{Value, value};
 use crate::{AppState, Clients, controllers::message_controller::recent_message_controller::ContentLabel};
 
 
-#[derive(Deserialize,Debug)]
-pub struct WSMessagePrivatePayload<'a>{
-    pub sender_id : u64,
-    pub receiver_id : u64,
-    pub chat_id : Option<u64>,
-    pub content_type: ContentLabel,
-    #[serde(borrow)]
-    pub description: &'a value::RawValue,
-}
 // #[derive(Deserialize,Debug)]
 
 pub async fn send_message_private<'a>(
     payload :WSMessagePrivatePayload<'a>,
     state:AppState,
     user_id:u64
-){
+){//content type see , and return presigned url
     println!("{:?}",payload);
     let receiver_id=payload.receiver_id;
     println!("{:?}",payload.receiver_id);
@@ -45,6 +36,15 @@ pub async fn send_message_private<'a>(
 
 }
 
+#[derive(Deserialize,Debug)]
+pub struct WSMessagePrivatePayload<'a>{
+    pub sender_id : u64,
+    pub receiver_id : u64,
+    pub chat_id : Option<u64>,
+    pub content_type: ContentLabel,
+    #[serde(borrow)]
+    pub description: &'a value::RawValue,
+}
 pub struct MessagePrivateDB{
    pub sender_id : u64,
    pub receiver_id:u64,
