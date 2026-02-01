@@ -26,7 +26,7 @@ pub struct CreateUserPayload {
 }
 pub async fn create_user(
     State(state): State<AppState>, 
-    Json(payload): Json<CreateUserPayload> // Extracted from the POST body
+    Json(payload): Json<CreateUserPayload>
 ) -> impl IntoResponse {
     
     let new_id = state.bucket_id.lock().await.get_id();
@@ -50,8 +50,7 @@ pub async fn create_user(
     )
     .execute(&state.db_pool)
     .await;
-
-    // 3. Handle the result
+    
     match query_result {
         Ok(_) => {
             (axum::http::StatusCode::CREATED, format!("user created with ID: {},username:{}, email {}", new_id,payload.username,payload.email))
